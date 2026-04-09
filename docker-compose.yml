@@ -25,9 +25,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8069:8069"
-      - "8072:8072"
     volumes:
       - ${ADDONS_PATH}:/mnt/extra-addons:ro
       - ${ENTERPRISE_PATH}:/mnt/enterprise-addons:ro
@@ -37,7 +34,35 @@ services:
       PORT: 5432
       USER: ${DB_USER:-odoo}
       PASSWORD: ${DB_PASSWORD:-odoo}
+    command: ["--admin_passwd", "${ODOO_ADMIN_PASSWD:-admin}", "--workers", "${ODOO_WORKERS:-6}"]
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/odoo-http.conf:/etc/nginx/templates/odoo-http.conf:ro
+      - ./nginx/odoo-ssl.conf.template:/etc/nginx/templates/odoo-ssl.conf.template:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+      - certbot-conf:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+    environment:
+      DOMAIN_NAME: ${DOMAIN_NAME:-}
+    entrypoint: /entrypoint.sh
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 
 volumes:
   odoo-db-data:
   odoo-web-data:
+  certbot-conf:
+  certbot-www:
