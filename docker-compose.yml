@@ -34,7 +34,7 @@ services:
       PORT: 5432
       USER: ${DB_USER:-odoo}
       PASSWORD: ${DB_PASSWORD:-odoo}
-    command: ["--admin_passwd", "${ODOO_ADMIN_PASSWD:-admin}", "--workers", "${ODOO_WORKERS:-6}"]
+    command: ["--workers", "${ODOO_WORKERS:-6}"]
 
   nginx:
     image: nginx:alpine
