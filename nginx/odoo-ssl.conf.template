@@ -27,8 +27,8 @@ server {
     server_name ${DOMAIN_NAME};
 
     # SSL certificates (managed by certbot)
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}-0001/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}-0001/privkey.pem;
 
     # SSL settings
     ssl_protocols       TLSv1.2 TLSv1.3;
