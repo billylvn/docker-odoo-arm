@@ -1,63 +1,85 @@
 #!/bin/bash
 set -e
 
-# ── Load .env ─────────────────────────────────────────────────────────────────
 if [ -f .env ]; then
-    export $(grep -v '^#' .env | xargs)
+  export $(grep -v '^#' .env | xargs)
 fi
 
 if [ -z "$DOMAIN_NAME" ]; then
-    echo "Error: DOMAIN_NAME is not set in .env"
-    echo "Set DOMAIN_NAME to your domain (e.g. erp.example.com) and re-run."
-    exit 1
+  echo "Error: DOMAIN_NAME is not set in .env"
+  exit 1
 fi
 
 if [ -z "$CERTBOT_EMAIL" ]; then
-    echo "Error: CERTBOT_EMAIL is not set in .env"
-    echo "Set CERTBOT_EMAIL to your email for Let's Encrypt notifications."
-    exit 1
+  echo "Error: CERTBOT_EMAIL is not set in .env"
+  exit 1
 fi
 
-# ── Step 1: Create dummy certificate ─────────────────────────────────────────
-echo "==> Creating dummy certificate for $DOMAIN_NAME ..."
-docker compose run --rm --entrypoint "\
-    mkdir -p /etc/letsencrypt/live/$DOMAIN_NAME" certbot
-docker compose run --rm --entrypoint "\
-    openssl req -x509 -nodes -newkey rsa:4096 -days 1 \
-    -keyout '/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem' \
-    -out '/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem' \
-    -subj '/CN=localhost'" certbot
+DATA_PATH="./data/certbot"
+RSA_KEY_SIZE=4096
+
+echo "==> Domain: $DOMAIN_NAME"
+echo "==> Email : $CERTBOT_EMAIL"
 echo
 
-# ── Step 2: Start nginx ──────────────────────────────────────────────────────
+echo "==> Cleaning old broken renewal/config lineage ..."
+docker compose run --rm --entrypoint sh certbot -c "\
+  rm -f /etc/letsencrypt/renewal/${DOMAIN_NAME}.conf && \
+  rm -rf /etc/letsencrypt/live/${DOMAIN_NAME} && \
+  rm -rf /etc/letsencrypt/archive/${DOMAIN_NAME} \
+"
+echo
+
+echo "==> Creating dummy certificate for bootstrap ..."
+docker compose run --rm --entrypoint sh certbot -c "\
+  mkdir -p /etc/letsencrypt/live/${DOMAIN_NAME} && \
+  openssl req -x509 -nodes -newkey rsa:${RSA_KEY_SIZE} -days 1 \
+    -keyout /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem \
+    -out /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem \
+    -subj '/CN=localhost' \
+"
+echo
+
 echo "==> Starting nginx ..."
 docker compose up -d nginx
 echo
 
-# ── Step 3: Delete dummy certificate ─────────────────────────────────────────
-echo "==> Deleting dummy certificate ..."
-docker compose run --rm --entrypoint "\
-    rm -rf /etc/letsencrypt/live/$DOMAIN_NAME && \
-    rm -rf /etc/letsencrypt/archive/$DOMAIN_NAME && \
-    rm -rf /etc/letsencrypt/renewal/$DOMAIN_NAME.conf" certbot
+echo "==> Waiting nginx to become ready ..."
+sleep 5
+docker compose ps nginx
 echo
 
-# ── Step 4: Request real certificate ─────────────────────────────────────────
-echo "==> Requesting Let's Encrypt certificate for $DOMAIN_NAME ..."
-docker compose run --rm --entrypoint "\
-    certbot certonly --webroot -w /var/www/certbot \
-    --email $CERTBOT_EMAIL \
-    -d $DOMAIN_NAME \
-    --rsa-key-size 4096 \
+echo "==> Removing dummy certificate ..."
+docker compose run --rm --entrypoint sh certbot -c "\
+  rm -rf /etc/letsencrypt/live/${DOMAIN_NAME} && \
+  rm -rf /etc/letsencrypt/archive/${DOMAIN_NAME} && \
+  rm -f /etc/letsencrypt/renewal/${DOMAIN_NAME}.conf \
+"
+echo
+
+echo "==> Requesting Let's Encrypt certificate ..."
+docker compose run --rm --entrypoint sh certbot -c "\
+  certbot certonly --webroot \
+    -w /var/www/certbot \
+    --cert-name ${DOMAIN_NAME} \
+    -d ${DOMAIN_NAME} \
+    --email ${CERTBOT_EMAIL} \
+    --rsa-key-size ${RSA_KEY_SIZE} \
     --agree-tos \
     --no-eff-email \
-    --force-renewal" certbot
+    --force-renewal \
+"
 echo
 
-# ── Step 5: Reload nginx ─────────────────────────────────────────────────────
-echo "==> Reloading nginx ..."
-docker compose exec nginx nginx -s reload
+echo "==> Checking resulting live directory ..."
+docker compose run --rm --entrypoint sh certbot -c "ls -l /etc/letsencrypt/live"
 echo
 
-echo "==> Done! SSL certificate installed for $DOMAIN_NAME"
-echo "    Your Odoo instance should now be available at https://$DOMAIN_NAME"
+echo "==> Recreating nginx so it reads the real certificate ..."
+docker compose up -d --force-recreate nginx
+echo
+
+echo "==> Done."
+echo "Test:"
+echo "  curl -I http://${DOMAIN_NAME}"
+echo "  curl -k -I https://${DOMAIN_NAME}"
